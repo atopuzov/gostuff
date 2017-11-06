@@ -1,0 +1,9 @@
+package: .
+import:
+- package: github.com/influxdata/influxdb
+  subpackages:
+  - client/v2
+- package: github.com/quhar/bme280
+- package: golang.org/x/exp
+  subpackages:
+  - io/i2c
