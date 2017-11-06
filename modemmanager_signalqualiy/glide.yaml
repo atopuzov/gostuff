@@ -1,0 +1,6 @@
+package: .
+import:
+- package: github.com/guelfey/go.dbus
+- package: github.com/influxdata/influxdb
+  subpackages:
+  - client/v2
