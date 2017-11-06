@@ -1,0 +1,6 @@
+package: .
+import:
+- package: github.com/d2r2/go-dht
+- package: github.com/influxdata/influxdb
+  subpackages:
+  - client/v2
