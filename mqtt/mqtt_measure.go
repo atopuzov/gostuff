@@ -33,7 +33,7 @@ func influxDBClient(server string, username string, password string) InfluxDB.Cl
 	return c
 }
 
-func publishMetric(c InfluxDB.Client, database string, m Measurement) {
+func publishMetric(c InfluxDB.Client, database string, tags map[string]string, fields map[string]interface{}) {
 	bp, err := InfluxDB.NewBatchPoints(InfluxDB.BatchPointsConfig{
 		Database:  database,
 		Precision: "s",
@@ -41,15 +41,6 @@ func publishMetric(c InfluxDB.Client, database string, m Measurement) {
 
 	if err != nil {
 		log.Fatalln("Unable to create batch points: ", err)
-	}
-
-	fields := map[string]interface{}{
-		"temperature": m.Temperature,
-		"humidity":    m.Humidity,
-	}
-
-	tags := map[string]string{
-		"client": m.Client,
 	}
 
 	pt, err := InfluxDB.NewPoint("sht30", tags, fields, time.Now())
@@ -91,7 +82,17 @@ func main() {
 					log.Printf("Unable to decode message '%s': %s\n", message.Payload(), err)
 				}
 				fmt.Println(measurement)
-				publishMetric(influx, *dbname, measurement)
+
+				fields := map[string]interface{}{
+					"temperature": measurement.Temperature,
+					"humidity":    measurement.Humidity,
+				}
+
+				tags := map[string]string{
+					"client": measurement.Client,
+				}
+
+				publishMetric(influx, *dbname, tags, fields)
 			}); token.Wait() && token.Error() != nil {
 			log.Fatalln("Unable to subscribe to MQTT topic: ", token.Error())
 		}
