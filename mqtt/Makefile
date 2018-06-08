@@ -13,6 +13,7 @@ all: $(TARGET);
 
 $(TARGET): $(GOFILES)
 	@go build $(LDFLAGS) -o $(TARGET)
+	@strip $(TARGET)
 
 .PHONY: clean
 clean:

@@ -15,10 +15,6 @@ import (
 	InfluxDB "github.com/influxdata/influxdb/client/v2"
 )
 
-const (
-	database = "temperature"
-)
-
 type Measurement struct {
 	Temperature float64 `json:"temperature"`
 	Humidity    float64 `json:"humidity"`
@@ -32,19 +28,19 @@ func influxDBClient(server string, username string, password string) InfluxDB.Cl
 		Password: password,
 	})
 	if err != nil {
-		log.Fatalln("Error: ", err)
+		log.Fatalln("Unable to connect to InfluxDB: ", err)
 	}
 	return c
 }
 
-func publishMetric(c InfluxDB.Client, m Measurement) {
+func publishMetric(c InfluxDB.Client, database string, m Measurement) {
 	bp, err := InfluxDB.NewBatchPoints(InfluxDB.BatchPointsConfig{
 		Database:  database,
 		Precision: "s",
 	})
 
 	if err != nil {
-		log.Fatalln("Error: ", err)
+		log.Fatalln("Unable to create batch points: ", err)
 	}
 
 	fields := map[string]interface{}{
@@ -58,14 +54,14 @@ func publishMetric(c InfluxDB.Client, m Measurement) {
 
 	pt, err := InfluxDB.NewPoint("sht30", tags, fields, time.Now())
 	if err != nil {
-		log.Fatalln("Error: ", err)
+		log.Fatalln("Unable to create new point: ", err)
 	}
 
 	bp.AddPoint(pt)
 
 	err = c.Write(bp)
 	if err != nil {
-		log.Fatalln("Error: ", err)
+		log.Fatalln("Unable to write the metric: ", err)
 	}
 }
 
@@ -75,9 +71,8 @@ func main() {
 	dbserver := flag.String("db-server", "http://localhost:8086", "InfluxDB server")
 	dbuser := flag.String("db-user", "admin", "InfluxDB username")
 	dbpass := flag.String("db-pass", "admin", "InfluxDB password")
+	dbname := flag.String("db-name", "temperature", "InfluxDB database")
 	flag.Parse()
-
-	fmt.Printf("%s %s %s %s %s\n", *mqttserver, *mqtttopic, *dbserver, *dbuser, *dbpass)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -93,19 +88,19 @@ func main() {
 			func(client MQTT.Client, message MQTT.Message) {
 				var measurement = Measurement{}
 				if err := json.Unmarshal(message.Payload(), &measurement); err != nil {
-					panic(err)
+					log.Printf("Unable to decode message '%s': %s\n", message.Payload(), err)
 				}
 				fmt.Println(measurement)
-				publishMetric(influx, measurement)
+				publishMetric(influx, *dbname, measurement)
 			}); token.Wait() && token.Error() != nil {
-			panic(token.Error())
+			log.Fatalln("Unable to subscribe to MQTT topic: ", token.Error())
 		}
 	}
 
 	client := MQTT.NewClient(opts)
 
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		panic(token.Error())
+		log.Fatalln("Unable to connect to the MQT server:", token.Error())
 	} else {
 		fmt.Println("Connected...")
 	}
