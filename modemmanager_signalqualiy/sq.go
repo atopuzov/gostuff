@@ -24,45 +24,60 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"time"
 
 	"github.com/guelfey/go.dbus"
-	"github.com/influxdata/influxdb/client/v2"
+	InfluxDB "github.com/influxdata/influxdb/client/v2"
 )
 
 const (
-	mm_bus_name    = "org.freedesktop.ModemManager1"
-	mm_object_path = "/org/freedesktop/ModemManager1/Modem/0"
-	mm_iface       = "org.freedesktop.ModemManager1.Modem.SignalQuality"
-	database       = "modem"
-	username       = "admin"
-	password       = "admin"
+	modemManager  = "org.freedesktop.ModemManager1"
+	signalQuality = "org.freedesktop.ModemManager1.Modem.SignalQuality"
+	getObjects    = "org.freedesktop.DBus.ObjectManager.GetManagedObjects"
 )
 
-func influxDBClient() client.Client {
-	c, err := client.NewHTTPClient(client.HTTPConfig{
-		Addr:     "http://localhost:8086",
+func influxDBClient(server string, username string, password string) InfluxDB.Client {
+	c, err := InfluxDB.NewHTTPClient(InfluxDB.HTTPConfig{
+		Addr:     server,
 		Username: username,
 		Password: password,
 	})
 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalln("Unable to connect to InfluxDB: ", err)
 	}
 
 	return c
 }
 
-func readSignalQuality() uint32 {
-	conn, err := dbus.SystemBus()
+func publishMetric(c InfluxDB.Client, database string, tags map[string]string, fields map[string]interface{}) {
+	bp, err := InfluxDB.NewBatchPoints(InfluxDB.BatchPointsConfig{
+		Database:  database,
+		Precision: "s",
+	})
 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalln("Unable to create batch points: ", err)
 	}
 
-	busObject := conn.Object(mm_bus_name, mm_object_path)
-	prop, err := busObject.GetProperty(mm_iface)
+	pt, err := InfluxDB.NewPoint("E3276", tags, fields, time.Now())
+	if err != nil {
+		log.Fatalln("Unable to create new point: ", err)
+	}
+
+	bp.AddPoint(pt)
+
+	err = c.Write(bp)
+	if err != nil {
+		log.Fatalln("Unable to write the metric: ", err)
+	}
+}
+
+func readSignalQuality(conn *dbus.Conn, modemPath dbus.ObjectPath) uint32 {
+	busObject := conn.Object(modemManager, modemPath)
+	prop, err := busObject.GetProperty(signalQuality)
 
 	if err != nil {
 		log.Fatal(err)
@@ -74,40 +89,44 @@ func readSignalQuality() uint32 {
 	return quality.(uint32)
 }
 
-func createMetrics(c client.Client) {
-	bp, err := client.NewBatchPoints(client.BatchPointsConfig{
-		Database:  database,
-		Precision: "s",
-	})
+func publishModemSQ(influx InfluxDB.Client, dbname string) {
+	conn, err := dbus.SystemBus()
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	signalquality := readSignalQuality()
+	busObject := conn.Object(modemManager, "/org/freedesktop/ModemManager1")
 
-	fields := map[string]interface{}{
-		"signalquality": signalquality,
-	}
-
-	tags := map[string]string{
-		"host": "localhost",
-	}
-
-	pt, err := client.NewPoint("E3276", tags, fields, time.Now())
+	objects := map[dbus.ObjectPath]map[string]map[string]dbus.Variant{}
+	err = busObject.Call(getObjects, 0).Store(&objects)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	bp.AddPoint(pt)
+	for objPath, _ := range objects {
+		signalquality := readSignalQuality(conn, objPath)
+		log.Printf("%s: %d", objPath, signalquality)
 
-	err = c.Write(bp)
-	if err != nil {
-		log.Fatal(err)
+		fields := map[string]interface{}{
+			"signalquality": signalquality,
+		}
+
+		tags := map[string]string{
+			"host": "localhost",
+		}
+		publishMetric(influx, dbname, tags, fields)
 	}
 }
 
 func main() {
-	c := influxDBClient()
-	createMetrics(c)
+	dbserver := flag.String("db-server", "http://localhost:8086", "InfluxDB server")
+	dbuser := flag.String("db-user", "admin", "InfluxDB username")
+	dbpass := flag.String("db-pass", "admin", "InfluxDB password")
+	dbname := flag.String("db-name", "modem", "InfluxDB database")
+	flag.Parse()
+
+	influx := influxDBClient(*dbserver, *dbuser, *dbpass)
+
+	publishModemSQ(influx, *dbname)
 }
